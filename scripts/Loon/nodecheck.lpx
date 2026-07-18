@@ -1,8 +1,8 @@
-#!name=节点阻断检测
-#!desc=在节点或策略组页面手动检测节点出口、本机网络与节点服务器的远端 TCP 可达性，辅助判断节点离线或疑似被阻断。
+#!name=Kiểm Tra Chặn Node
+#!desc=Kiểm tra thủ công tại trang node hoặc policy group: khả năng ra ngoài của node, tình trạng mạng máy và khả năng kết nối TCP từ xa tới server node, giúp phân đoán node offline hay nghi bị chặn.
 #!author=RavelloH, MaYIHEI
 #!homepage=https://github.com/RavelloH
-#!tag=节点, 检测
+#!tag=node, kiểm tra
 
 [Script]
-generic script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/nodecheck/nodecheck.js, tag=节点阻断检测, timeout=20, img-url=bolt.horizontal.icloud.fill.system, enable=true
+generic script-path=https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/Loon/nodecheck.js, tag=Kiểm Tra Chặn Node, timeout=20, img-url=bolt.horizontal.icloud.fill.system, enable=true
