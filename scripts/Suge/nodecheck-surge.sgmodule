@@ -1,0 +1,11 @@
+#!name=Kiểm Tra Chặn Node
+#!desc=Kiểm tra node đang xuất (outbound) của Surge có kết nối được không, giúp phân đoán bị nhà mạng/GFW chặn hay không. Chuyển thể bản Surge Panel dựa trên block_check.js của RavelloH.
+#!author=RavelloH
+#!category=Tool
+#!system=ios
+
+[Panel]
+BlockCheck = title="Kiểm Tra Chặn Node",content="Bấm làm mới để kiểm tra",style=info,icon=bolt.horizontal.icloud.fill,icon-color=#007AFF,script-name=BlockCheck
+
+[Script]
+BlockCheck = type=generic,script-path=https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/Surge/nodecheck-surge.js,timeout=30
