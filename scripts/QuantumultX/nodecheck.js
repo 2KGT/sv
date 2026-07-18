@@ -1,292 +1,381 @@
 /**
- * 节点阻断检测 · Loon generic 脚本
+ * Kiểm Tra Chặn Node · Script kiểm tra khả năng kết nối của node
+ * Bản gốc: https://github.com/RavelloH
+ * Việt hoá & tự host: 2KGT <https://github.com/2KGT/sv>
  *
- * 使用:在 Loon 的节点或策略组页面对目标执行「节点阻断检测」
+ * Chức năng:
+ *   Kiểm tra node hiện tại có kết nối được không, và phân biệt node
+ *   offline hay đang bị nhà mạng / GFW chặn.
  *
- * @Author: @RavelloH <https://github.com/RavelloH>
- * @Modifier: MaYIHEI <https://github.com/MaYIHEI/paperclip>
- * @Channel: Telegram 频道 https://t.me/mayihei
- * @Updated: 2026-07-17
+ * Cấu hình (Quantumult X):
+ *   [task_local]
+ *   event-interaction https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/QuantumultX/nodecheck.js, tag=Kiểm Tra Chặn Node, img-url=bolt.horizontal.icloud.fill.system, enabled=true
  *
- * ===== Loon =====
- * [Script]
- * generic script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/nodecheck/nodecheck.js, tag=节点阻断检测, timeout=20, img-url=bolt.horizontal.icloud.fill.system, enable=true
+ * Cách dùng: nhấn giữ node trong danh sách → chọn chạy script
  */
 
-const SCRIPT_VERSION = "2026-07-17.r1";
-const IP_API = "http://ip-api.com/json?lang=zh-CN";
+const IP_API = "http://ip-api.com/json?lang=vi";
 const CHECK_HOST = "https://check-host.net";
-const REQUEST_TIMEOUT = 8000;
-const RESULT_DELAY = 3500;
-const RESULT_RETRY_DELAY = 2500;
-
-const params = typeof $environment !== "undefined" && $environment.params
-    ? $environment.params
-    : {};
-const nodeName = params.node || "";
-const nodeInfo = params.nodeInfo || {};
-
-console.log(`[INFO] 节点阻断检测 ${SCRIPT_VERSION}`);
-console.log(`[INFO] 节点: ${nodeName || "未获取"}`);
-
-if (!nodeName) {
-    finishError("未获取到节点或策略组名称");
-} else {
-    run();
-}
+const GP_API = "https://api.globalping.io/v1/measurements";
+const TIMEOUT = 8000;
 
 function run() {
-    Promise.all([
-        requestGeo(nodeName).then(
-            (data) => ({ ok: true, data }),
-            (error) => ({ ok: false, error: errorMessage(error) })
-        ),
-        requestGeo("DIRECT").then(
-            (data) => ({ ok: true, data }),
-            (error) => ({ ok: false, error: errorMessage(error) })
-        ),
-        checkRemote(nodeInfo),
-    ]).then(
-        (results) => render(results[0], results[1], results[2]),
-        (error) => finishError(`检测异常: ${errorMessage(error)}`)
-    );
-}
+  const tag = $environment.params;
+  if (!tag) return done("Không lấy được tên node");
 
-function requestGeo(node) {
-    return requestJson(IP_API, node).then((data) => {
-        if (data && data.status === "fail") {
-            throw new Error(data.message || "IP 查询失败");
+  $configuration.sendMessage({
+    action: "get_server_description",
+    content: tag
+  }).then(function(resolve) {
+    var host = null, port = null;
+    if (resolve.ret && resolve.ret[tag]) {
+      var desc = resolve.ret[tag];
+      var eq = desc.indexOf("=");
+      if (eq !== -1) {
+        var afterEq = desc.substring(eq + 1);
+        var comma = afterEq.indexOf(",");
+        var hp = comma === -1 ? afterEq : afterEq.substring(0, comma);
+        var colon = hp.lastIndexOf(":");
+        if (colon !== -1) {
+          host = hp.substring(0, colon);
+          port = hp.substring(colon + 1);
         }
-        return data;
-    });
-}
-
-function requestJson(url, node) {
-    return new Promise((resolve, reject) => {
-        const options = {
-            url,
-            timeout: REQUEST_TIMEOUT,
-            headers: {
-                Accept: "application/json",
-                "User-Agent": "Loon Node Check",
-            },
-        };
-        if (node) options.node = node;
-
-        $httpClient.get(options, (error, response, body) => {
-            if (error) {
-                reject(new Error(String(error)));
-                return;
-            }
-            const status = Number(response && response.status);
-            if (status < 200 || status >= 300) {
-                reject(new Error(`HTTP ${status || "?"}`));
-                return;
-            }
-            try {
-                resolve(JSON.parse(body));
-            } catch (_) {
-                reject(new Error("响应解析失败"));
-            }
-        });
-    });
-}
-
-function checkRemote(info) {
-    const address = info && info.address ? String(info.address) : "";
-    const port = info && info.port ? String(info.port) : "";
-    if (!address || !port) {
-        return Promise.resolve({
-            available: false,
-            reachable: false,
-            error: "策略组未提供节点地址，请直接对具体节点运行",
-        });
+      }
     }
+    startChecks(tag, host, port);
+  }, function() {
+    startChecks(tag, null, null);
+  });
+}
 
-    const host = address.indexOf(":") !== -1 && address.charAt(0) !== "["
-        ? `[${address}]`
-        : address;
-    const target = `${host}:${port}`;
-    const submitUrl = `${CHECK_HOST}/check-tcp?host=${encodeURIComponent(target)}&max_nodes=10`;
+function startChecks(tag, host, port) {
+  var opts = { policy: $environment.params };
 
-    return requestJson(submitUrl, "DIRECT").then(
-        (submission) => {
-            if (!submission || !submission.ok || !submission.request_id) {
-                return {
-                    available: false,
-                    reachable: false,
-                    target,
-                    error: "远端探测提交失败",
-                };
-            }
+  var pA = $task.fetch({ url: IP_API, opts: opts, timeout: TIMEOUT })
+    .then(function(r) { return { src: "node", ok: true, data: JSON.parse(r.body) }; })
+    .catch(function() { return { src: "node", ok: false }; });
 
-            const nodes = submission.nodes || {};
-            const names = Object.keys(nodes);
-            const countries = {};
-            names.forEach((name) => {
-                countries[name] = Array.isArray(nodes[name]) ? nodes[name][0] : "";
-            });
+  var pB = $task.fetch({ url: IP_API, timeout: TIMEOUT })
+    .then(function(r) { return { src: "direct", ok: true, data: JSON.parse(r.body) }; })
+    .catch(function() { return { src: "direct", ok: false }; });
 
-            return wait(RESULT_DELAY)
-                .then(() => getRemoteResult(submission.request_id, names, countries))
-                .then((result) => {
-                    if (result.complete) return result;
-                    return wait(RESULT_RETRY_DELAY)
-                        .then(() => getRemoteResult(submission.request_id, names, countries));
-                })
-                .then((result) => {
-                    if (!result.complete) {
-                        return {
-                            available: false,
-                            reachable: false,
-                            target,
-                            error: "远端探测暂未返回结果",
-                        };
-                    }
-                    return {
-                        available: true,
-                        reachable: result.reachable,
-                        data: result.items,
-                        target,
-                    };
+  var pC;
+  if (host && port) {
+    var target = host + ":" + port;
+    var checkUrl = CHECK_HOST + "/check-tcp?host=" + encodeURIComponent(target) + "&max_nodes=10";
+    pC = $task.fetch({ url: checkUrl, headers: { "Accept": "application/json" }, timeout: TIMEOUT })
+      .then(function(r) {
+        var d = JSON.parse(r.body);
+        if (!d.ok || !d.request_id) return { src: "remote", ok: false, error: "Gửi yêu cầu thất bại" };
+        var rid = d.request_id;
+        var nodeList = d.nodes || {};
+        var nodeNames = Object.keys(nodeList);
+        var countryMap = {};
+        nodeNames.forEach(function(n) {
+          var info = nodeList[n];
+          if (info && info.length >= 1) countryMap[n] = info[0];
+        });
+        return new Promise(function(resolve) {
+          setTimeout(function() {
+            $task.fetch({ url: CHECK_HOST + "/check-result/" + rid, headers: { "Accept": "application/json" }, timeout: TIMEOUT })
+              .then(function(r2) {
+                var res = JSON.parse(r2.body);
+                var reachable = false;
+                var items = [];
+                nodeNames.forEach(function(n) {
+                  var cc = countryMap[n] || "";
+                  var flag = cc ? getFlag(cc) : "🌍";
+                  var nr = res[n];
+                  var ms = '<code style="font-family: Menlo, Monaco, monospace; font-size: 12px">--.--ms</code>';
+                  if (nr && Array.isArray(nr) && nr.length > 0 && nr[0].time !== undefined) {
+                    reachable = true;
+                    ms = '<code style="font-family: Menlo, Monaco, monospace; font-size: 12px">' + formatMs(nr[0].time * 1000) + '</code>';
+                  }
+                  items.push({ flag: flag, ms: ms });
                 });
-        },
-        (error) => ({
-            available: false,
-            reachable: false,
-            target,
-            error: `远端探测不可用: ${errorMessage(error)}`,
-        })
-    ).then(
-        (result) => result,
-        (error) => ({
-            available: false,
-            reachable: false,
-            target,
-            error: `远端探测不可用: ${errorMessage(error)}`,
-        })
-    );
-}
-
-function getRemoteResult(requestId, names, countries) {
-    return requestJson(`${CHECK_HOST}/check-result/${requestId}`, "DIRECT").then((result) => {
-        let reachable = false;
-        let complete = false;
-        const items = names.map((name) => {
-            const records = result && result[name];
-            const record = Array.isArray(records) && records.length ? records[0] : null;
-            const seconds = record && Number(record.time);
-            if (record !== null) complete = true;
-            if (Number.isFinite(seconds) && seconds >= 0) reachable = true;
-            return {
-                flag: getFlag(countries[name]),
-                ms: Number.isFinite(seconds) && seconds >= 0
-                    ? formatMs(seconds * 1000)
-                    : "--.--ms",
-            };
+                resolve({ src: "remote", ok: reachable, data: items });
+              }, function() {
+                resolve({ src: "remote", ok: false, error: "Truy vấn thất bại" });
+              });
+          }, 3500);
         });
-        return { reachable, complete, items };
-    });
+      })
+      .catch(function() { return { src: "remote", ok: false, error: "Yêu cầu thất bại" }; });
+  } else {
+    pC = Promise.resolve({ src: "remote", ok: false, error: "Không có thông tin địa chỉ" });
+  }
+
+  Promise.allSettled([pA, pB, pC]).then(function(results) {
+    var node = results[0].value;
+    var direct = results[1].value;
+    var checkHost = results[2].value;
+
+    var nOk = node && node.ok;
+    var dOk = direct && direct.ok;
+    var cOk = checkHost && checkHost.ok;
+
+    // check-host thông + node không thông → kích hoạt định vị trong nước
+    if (dOk && cOk && !nOk && host && port) {
+      runGlobalping(tag, host, port, node, direct, checkHost);
+    } else {
+      render(tag, node, direct, checkHost, null);
+    }
+  });
 }
 
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function runGlobalping(tag, host, port, node, direct, checkHost) {
+  var body = {
+    type: "ping",
+    target: host,
+    measurementOptions: { port: parseInt(port), protocol: "TCP" },
+    locations: [{ country: "CN", tags: ["eyeball-network"] }],
+    limit: 12
+  };
+
+  $task.fetch({
+    url: GP_API,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    timeout: TIMEOUT
+  }).then(function(r) {
+    var d = JSON.parse(r.body);
+    if (!d.id) { render(tag, node, direct, checkHost, null); return; }
+
+    setTimeout(function() {
+      $task.fetch({
+        url: GP_API + "/" + d.id,
+        headers: { "Accept": "application/json" },
+        timeout: TIMEOUT
+      }).then(function(r2) {
+        render(tag, node, direct, checkHost, JSON.parse(r2.body));
+      }, function() {
+        render(tag, node, direct, checkHost, null);
+      });
+    }, 6000);
+  }).catch(function() {
+    render(tag, node, direct, checkHost, null);
+  });
 }
 
-function render(node, direct, remote) {
-    const parts = [];
+function classifyISP(network) {
+  var n = network.toLowerCase();
+  if (n.indexOf("unicom") !== -1 || n.indexOf("china unicom") !== -1) return "China Unicom";
+  if (n.indexOf("chinanet") !== -1 || n.indexOf("telecom") !== -1 || n.indexOf("china telecom") !== -1) return "China Telecom";
+  if (n.indexOf("mobile") !== -1 || n.indexOf("china mobile") !== -1) return "China Mobile";
+  return null;
+}
 
-    let nodeBlock = `<b>节点代理</b>: ${node.ok ? "✅ 正常" : "❌ 不可达"}`;
-    if (node.ok && node.data) {
-        const data = node.data;
-        const location = [data.country, data.regionName || data.region, data.city].filter(Boolean).join(" - ");
-        nodeBlock += `<br/><b>IP</b>: ${escapeHtml(data.ip || data.query || "未知")}`;
-        if (location) nodeBlock += `<br/><b>位置</b>: ${escapeHtml(location)}`;
-        nodeBlock += `<br/><b>ISP</b>: ${escapeHtml(data.isp || data.organization || "未知")}`;
-    } else if (node.error) {
-        nodeBlock += `<br/><small>${escapeHtml(node.error)}</small>`;
+function analyzeBlockSource(gpData) {
+  var results = gpData.results;
+  if (!results) return null;
+
+  var ispGroups = {};
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var isp = classifyISP(r.probe.network);
+    if (!isp) continue;
+
+    if (!ispGroups[isp]) ispGroups[isp] = { probes: [], reachable: false };
+
+    var res = r.result;
+    var ok = false;
+    var ms = "--.--ms";
+    var stats = res.stats;
+    if (res.status === "finished" && stats) {
+      ok = stats.rcv > 0;
+      ms = ok ? formatMs(stats.avg || 0) : "--.--ms";
     }
-    parts.push(nodeBlock);
+    if (ok) ispGroups[isp].reachable = true;
 
-    let directBlock = `<b>本机网络</b>: ${direct.ok ? "✅ 正常" : "❌ 异常"}`;
-    if (!direct.ok && direct.error) {
-        directBlock += `<br/><small>${escapeHtml(direct.error)}</small>`;
-    }
-    parts.push(directBlock);
-
-    let remoteBlock;
-    if (!remote.available) {
-        remoteBlock = "<b>远端探测</b>: ⚠️ 未完成";
-        if (remote.error) remoteBlock += `<br/><small>${escapeHtml(remote.error)}</small>`;
-    } else {
-        remoteBlock = `<b>远端探测</b>: ${remote.reachable ? "✅ 可达" : "❌ 不可达"}`;
-        if (remote.data && remote.data.length) {
-            for (let i = 0; i < remote.data.length; i += 2) {
-                const left = remote.data[i];
-                const right = remote.data[i + 1];
-                remoteBlock += `<br/>${left.flag} <code>${left.ms}</code>`;
-                if (right) remoteBlock += `&emsp;&emsp;${right.flag} <code>${right.ms}</code>`;
-            }
-        }
-    }
-    parts.push(remoteBlock);
-
-    parts.push("<b>📋 诊断结论</b>");
-    if (!direct.ok) {
-        parts.push("⚠️ 本机网络异常");
-    } else if (node.ok) {
-        parts.push("✅ 节点正常");
-    } else if (remote.available && remote.reachable) {
-        parts.push("🚫 疑似被运营商 / GFW 阻断");
-    } else if (remote.available) {
-        parts.push("💤 节点疑似离线");
-    } else {
-        parts.push("❓ 数据不足，无法区分阻断或离线");
-    }
-
-    const type = nodeInfo.type ? ` · ${escapeHtml(nodeInfo.type)}` : "";
-    parts.push(`<b>节点</b>: <span style="color:#467fcf">${escapeHtml(nodeName)}${type}</span>`);
-    if (remote.target) {
-        parts.push(`<small>探测目标: ${escapeHtml(remote.target)}</small>`);
-    }
-
-    $done({
-        title: "   🌐 节点阻断检测",
-        htmlMessage: `<div style="font-family:-apple-system;font-size:large">${parts.join("<br/><br/>")}</div>`,
+    ispGroups[isp].probes.push({
+      city: cnCity(r.probe.city),
+      ok: ok,
+      ms: ms
     });
+  }
+
+  var reachableIsps = [], blockedIsps = [];
+  var keys = Object.keys(ispGroups);
+  for (var k = 0; k < keys.length; k++) {
+    var g = ispGroups[keys[k]];
+    if (g.probes.length === 0) continue;
+    if (g.reachable) reachableIsps.push(keys[k]); else blockedIsps.push(keys[k]);
+  }
+
+  var conclusion;
+  if (reachableIsps.length === 0) {
+    conclusion = "🚫 GFW chặn toàn diện — cả 3 nhà mạng lớn của Trung Quốc đều không truy cập được";
+  } else if (blockedIsps.length > 0) {
+    conclusion = "🚫 Bị chặn ở cấp nhà mạng — " + blockedIsps.join("、") + " không kết nối được, " + reachableIsps.join("、") + " bình thường";
+  } else {
+    conclusion = "✅ Cả 3 nhà mạng lớn của Trung Quốc đều kết nối được, không phải do GFW hay nhà mạng chặn, hãy kiểm tra lại cấu hình client";
+  }
+
+  return { ispGroups: ispGroups, conclusion: conclusion };
+}
+
+function cnCity(en) {
+  var map = {
+    "Beijing": "Bắc Kinh", "Shanghai": "Thượng Hải", "Guangzhou": "Quảng Châu",
+    "Shenzhen": "Thâm Quyến", "Chengdu": "Thành Đô", "Hangzhou": "Hàng Châu",
+    "Wuhan": "Vũ Hán", "Nanjing": "Nam Kinh", "Tianjin": "Thiên Tân",
+    "Xi'an": "Tây An", "Changsha": "Trường Sa", "Zhengzhou": "Trịnh Châu",
+    "Jinan": "Tế Nam", "Qingdao": "Thanh Đảo", "Dalian": "Đại Liên",
+    "Xiamen": "Hạ Môn", "Fuzhou": "Phúc Châu", "Kunming": "Côn Minh",
+    "Hefei": "Hợp Phì", "Ningbo": "Ninh Ba", "Suzhou": "Tô Châu",
+    "Wuxi": "Vô Tích", "Changzhou": "Thường Châu", "Guilin": "Quế Lâm",
+    "Nanning": "Nam Ninh", "Haikou": "Hải Khẩu", "Sanya": "Tam Á",
+    "Guiyang": "Quý Dương", "Lanzhou": "Lan Châu", "Urumqi": "Urumqi",
+    "Hohhot": "Hohhot", "Harbin": "Cáp Nhĩ Tân", "Changchun": "Trường Xuân",
+    "Shenyang": "Thẩm Dương", "Shijiazhuang": "Thạch Gia Trang", "Taiyuan": "Thái Nguyên",
+    "Xuzhou": "Từ Châu", "Yancheng": "Diêm Thành", "Taishan": "Đài Sơn",
+    "Nanchang": "Nam Xương", "Foshan": "Phật Sơn", "Dongguan": "Đông Hoản",
+    "Zhuhai": "Châu Hải", "Zhongshan": "Trung Sơn", "Huizhou": "Huệ Châu"
+  };
+  return map[en] || en;
 }
 
 function formatMs(ms) {
-    if (ms >= 10000) return `${Math.floor(ms)}ms`;
-    if (ms >= 1000) return `${Math.floor(ms).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}ms`;
-    if (ms >= 100) return `${ms.toFixed(1)}ms`;
-    if (ms >= 10) return `${ms.toFixed(2)}ms`;
-    if (ms <= 0) return "0.00ms";
-    return `${ms.toFixed(3)}ms`;
+  if (ms >= 10000) {
+    return Math.floor(ms) + "ms";
+  } else if (ms >= 1000) {
+    return Math.floor(ms).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "ms";
+  } else if (ms >= 100) {
+    return ms.toFixed(1) + "ms";
+  } else if (ms >= 10) {
+    return ms.toFixed(2) + "ms";
+  } else if (ms <= 0) {
+    return "0.00ms";
+  } else {
+    return ms.toFixed(3) + "ms";
+  }
 }
 
-function getFlag(countryCode) {
-    if (!countryCode || String(countryCode).length !== 2) return "🌍";
-    const points = String(countryCode).toUpperCase().split("").map((char) => 127397 + char.charCodeAt());
-    return String.fromCodePoint.apply(null, points);
+function render(tag, node, direct, remote, gpData) {
+  var nOk = node && node.ok;
+  var dOk = direct && direct.ok;
+  var rOk = remote && remote.ok;
+
+  var parts = [];
+
+  // Node proxy
+  var nodeStr = '<span style="font-weight: bold">Node proxy</span>: ' + (nOk ? "✅ Bình thường" : "❌ Không kết nối được");
+  if (nOk && node.data) {
+    var d = node.data;
+    nodeStr += '<br/>' + '<span style="font-weight: bold">IP</span>: ' + d.query;
+    nodeStr += '<br/>' + '<span style="font-weight: bold">Vị trí</span>: ' + [d.country, d.regionName, d.city].filter(Boolean).join(" - ");
+    nodeStr += '<br/>' + '<span style="font-weight: bold">ISP</span>: ' + (d.isp || "Không rõ");
+  }
+  parts.push(nodeStr);
+
+  // Mạng máy
+  parts.push('<span style="font-weight: bold">Mạng máy</span>: ' + (dOk ? "✅ Bình thường" : "❌ Bất thường"));
+
+  // Kiểm tra từ xa
+  var remoteStr = '<span style="font-weight: bold">Kiểm tra từ xa</span>: ' + (rOk ? "✅ Kết nối được" : "❌ Không kết nối được");
+  if (remote && remote.data && remote.data.length > 0) {
+    var items = remote.data;
+    for (var i = 0; i < items.length; i += 2) {
+      var left = items[i];
+      var right = i + 1 < items.length ? items[i + 1] : null;
+      remoteStr += '<br/>' + left.flag + " " + left.ms;
+      if (right) {
+        remoteStr += "&emsp;&emsp;" + right.flag + " " + right.ms;
+      }
+    }
+  } else if (remote && remote.error) {
+    remoteStr += '<br/>' + remote.error;
+  }
+  parts.push(remoteStr);
+
+  // Định vị trong nước (chỉ có dữ liệu khi nghi bị chặn)
+  if (gpData && gpData.results) {
+    var analysis = analyzeBlockSource(gpData);
+    if (analysis) {
+      // Gom tất cả probe, sắp theo nhà mạng: Điện Tín → Liên Thông → Di Động
+      var ispOrder = ["China Telecom", "China Unicom", "China Mobile"];
+      var ispAbbr = { "China Telecom": "Điện Tín", "China Unicom": "Liên Thông", "China Mobile": "Di Động" };
+      var allProbes = [];
+      for (var j = 0; j < ispOrder.length; j++) {
+        var key = ispOrder[j];
+        var group = analysis.ispGroups[key];
+        if (!group) continue;
+        for (var p = 0; p < group.probes.length; p++) {
+          allProbes.push({
+            label: ispAbbr[key] + "·" + group.probes[p].city,
+            ms: group.probes[p].ms,
+            ok: group.probes[p].ok
+          });
+        }
+      }
+
+      var domesticReachable = allProbes.some(function(p) { return p.ok; });
+      var gpStr = '<span style="font-weight: bold">Kiểm tra tại Trung Quốc</span>: ' + (domesticReachable ? "✅ Kết nối được" : "❌ Không kết nối được");
+      if (allProbes.length > 0) {
+        for (var i2 = 0; i2 < allProbes.length; i2 += 2) {
+          var left = allProbes[i2];
+          var right = i2 + 1 < allProbes.length ? allProbes[i2 + 1] : null;
+          var lc = left.ok ? "#4CAF50" : "#f44336";
+          gpStr += '<br/>' + left.label + ' ';
+          gpStr += '<code style="font-family: Menlo, Monaco, monospace; font-size: 12px; color: ' + lc + '">' + left.ms + '</code>';
+          if (right) {
+            var rc = right.ok ? "#4CAF50" : "#f44336";
+            gpStr += "&emsp;&emsp;" + right.label + ' ';
+            gpStr += '<code style="font-family: Menlo, Monaco, monospace; font-size: 12px; color: ' + rc + '">' + right.ms + '</code>';
+          }
+        }
+      }
+      parts.push(gpStr);
+    }
+  }
+
+  // Kết luận
+  parts.push('<span style="font-weight: bold">📋 Kết luận</span>');
+
+  if (!dOk) {
+    parts.push('⚠️ Mạng máy bất thường');
+  } else if (nOk && rOk) {
+    parts.push('✅ Node hoạt động bình thường');
+  } else if (!nOk && rOk && dOk) {
+    if (gpData && gpData.results) {
+      var a2 = analyzeBlockSource(gpData);
+      if (a2 && a2.conclusion) {
+        parts.push(a2.conclusion);
+      } else {
+        parts.push('🚫 Nghi bị nhà mạng / GFW chặn');
+      }
+    } else {
+      parts.push('🚫 Nghi bị nhà mạng / GFW chặn');
+    }
+  } else if (!nOk && !rOk && dOk) {
+    parts.push('💤 Node đã offline');
+  } else {
+    parts.push('❓ Dữ liệu không đầy đủ');
+  }
+
+  // Tên node
+  parts.push('<span style="font-weight: bold">Node</span>: <span style="color: #467fcf">' + (tag || "Node hiện tại") + '</span>');
+
+  var html = parts.join('<br/><br/>');
+
+  $done({
+    "title": "   🌐 Kiểm Tra Chặn Node",
+    htmlMessage: '<div style="font-family: -apple-system; font-size: large">' + html + '</div>'
+  });
 }
 
-function escapeHtml(value) {
-    return String(value === undefined || value === null ? "" : value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+function getFlag(cc) {
+  if (!cc || cc.length !== 2) return "🌍";
+  var cp = cc.toUpperCase().split('').map(function(c) { return 127397 + c.charCodeAt(); });
+  return String.fromCodePoint.apply(null, cp);
 }
 
-function errorMessage(error) {
-    return error && error.message ? error.message : String(error || "未知错误");
+function done(msg) {
+  $done({
+    "title": "   🌐 Kiểm Tra Chặn Node",
+    htmlMessage: '<div style="font-family: -apple-system; font-size: large"><span style="font-weight: bold">🛑 ' + msg + '</span></div>'
+  });
 }
 
-function finishError(message) {
-    $done({
-        title: "   🌐 节点阻断检测",
-        htmlMessage: `<div style="font-family:-apple-system;font-size:large"><b>🛑 ${escapeHtml(message)}</b></div>`,
-    });
-}
+run();
