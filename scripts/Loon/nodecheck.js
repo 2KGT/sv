@@ -1,20 +1,21 @@
 /**
- * 节点阻断检测 · Loon generic 脚本
+ * Kiểm Tra Chặn Node · Loon generic script
  *
- * 使用:在 Loon 的节点或策略组页面对目标执行「节点阻断检测」
+ * Cách dùng: tại trang node hoặc policy group của Loon, chạy script "Kiểm Tra Chặn Node" trên mục tiêu cần kiểm tra
  *
  * @Author: @RavelloH <https://github.com/RavelloH>
  * @Modifier: MaYIHEI <https://github.com/MaYIHEI/paperclip>
- * @Channel: Telegram 频道 https://t.me/mayihei
+ * @Channel: Kênh Telegram https://t.me/mayihei
+ * @Localized (VI) & self-hosted: 2KGT <https://github.com/2KGT/sv>
  * @Updated: 2026-07-17
  *
  * ===== Loon =====
  * [Script]
- * generic script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/nodecheck/nodecheck.js, tag=节点阻断检测, timeout=20, img-url=bolt.horizontal.icloud.fill.system, enable=true
+ * generic script-path=https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/Loon/nodecheck.js, tag=Kiểm Tra Chặn Node, timeout=20, img-url=bolt.horizontal.icloud.fill.system, enable=true
  */
 
 const SCRIPT_VERSION = "2026-07-17.r1";
-const IP_API = "http://ip-api.com/json?lang=zh-CN";
+const IP_API = "http://ip-api.com/json?lang=vi";
 const CHECK_HOST = "https://check-host.net";
 const REQUEST_TIMEOUT = 8000;
 const RESULT_DELAY = 3500;
@@ -26,11 +27,11 @@ const params = typeof $environment !== "undefined" && $environment.params
 const nodeName = params.node || "";
 const nodeInfo = params.nodeInfo || {};
 
-console.log(`[INFO] 节点阻断检测 ${SCRIPT_VERSION}`);
-console.log(`[INFO] 节点: ${nodeName || "未获取"}`);
+console.log(`[INFO] Kiểm Tra Chặn Node ${SCRIPT_VERSION}`);
+console.log(`[INFO] Node: ${nodeName || "chưa lấy được"}`);
 
 if (!nodeName) {
-    finishError("未获取到节点或策略组名称");
+    finishError("Không lấy được tên node hoặc policy group");
 } else {
     run();
 }
@@ -48,14 +49,14 @@ function run() {
         checkRemote(nodeInfo),
     ]).then(
         (results) => render(results[0], results[1], results[2]),
-        (error) => finishError(`检测异常: ${errorMessage(error)}`)
+        (error) => finishError(`Lỗi khi kiểm tra: ${errorMessage(error)}`)
     );
 }
 
 function requestGeo(node) {
     return requestJson(IP_API, node).then((data) => {
         if (data && data.status === "fail") {
-            throw new Error(data.message || "IP 查询失败");
+            throw new Error(data.message || "Truy vấn IP thất bại");
         }
         return data;
     });
@@ -86,7 +87,7 @@ function requestJson(url, node) {
             try {
                 resolve(JSON.parse(body));
             } catch (_) {
-                reject(new Error("响应解析失败"));
+                reject(new Error("Không phân tích được phản hồi"));
             }
         });
     });
@@ -99,7 +100,7 @@ function checkRemote(info) {
         return Promise.resolve({
             available: false,
             reachable: false,
-            error: "策略组未提供节点地址，请直接对具体节点运行",
+            error: "Policy group chưa cung cấp địa chỉ node, vui lòng chạy trực tiếp trên node cụ thể",
         });
     }
 
@@ -116,7 +117,7 @@ function checkRemote(info) {
                     available: false,
                     reachable: false,
                     target,
-                    error: "远端探测提交失败",
+                    error: "Gửi yêu cầu kiểm tra từ xa thất bại",
                 };
             }
 
@@ -140,7 +141,7 @@ function checkRemote(info) {
                             available: false,
                             reachable: false,
                             target,
-                            error: "远端探测暂未返回结果",
+                            error: "Kiểm tra từ xa chưa trả kết quả",
                         };
                     }
                     return {
@@ -155,7 +156,7 @@ function checkRemote(info) {
             available: false,
             reachable: false,
             target,
-            error: `远端探测不可用: ${errorMessage(error)}`,
+            error: `Kiểm tra từ xa không khả dụng: ${errorMessage(error)}`,
         })
     ).then(
         (result) => result,
@@ -163,7 +164,7 @@ function checkRemote(info) {
             available: false,
             reachable: false,
             target,
-            error: `远端探测不可用: ${errorMessage(error)}`,
+            error: `Kiểm tra từ xa không khả dụng: ${errorMessage(error)}`,
         })
     );
 }
@@ -196,19 +197,19 @@ function wait(ms) {
 function render(node, direct, remote) {
     const parts = [];
 
-    let nodeBlock = `<b>节点代理</b>: ${node.ok ? "✅ 正常" : "❌ 不可达"}`;
+    let nodeBlock = `<b>Node proxy</b>: ${node.ok ? "✅ Bình thường" : "❌ Không kết nối được"}`;
     if (node.ok && node.data) {
         const data = node.data;
         const location = [data.country, data.regionName || data.region, data.city].filter(Boolean).join(" - ");
-        nodeBlock += `<br/><b>IP</b>: ${escapeHtml(data.ip || data.query || "未知")}`;
-        if (location) nodeBlock += `<br/><b>位置</b>: ${escapeHtml(location)}`;
-        nodeBlock += `<br/><b>ISP</b>: ${escapeHtml(data.isp || data.organization || "未知")}`;
+        nodeBlock += `<br/><b>IP</b>: ${escapeHtml(data.ip || data.query || "Không rõ")}`;
+        if (location) nodeBlock += `<br/><b>Vị trí</b>: ${escapeHtml(location)}`;
+        nodeBlock += `<br/><b>ISP</b>: ${escapeHtml(data.isp || data.organization || "Không rõ")}`;
     } else if (node.error) {
         nodeBlock += `<br/><small>${escapeHtml(node.error)}</small>`;
     }
     parts.push(nodeBlock);
 
-    let directBlock = `<b>本机网络</b>: ${direct.ok ? "✅ 正常" : "❌ 异常"}`;
+    let directBlock = `<b>Mạng máy</b>: ${direct.ok ? "✅ Bình thường" : "❌ Bất thường"}`;
     if (!direct.ok && direct.error) {
         directBlock += `<br/><small>${escapeHtml(direct.error)}</small>`;
     }
@@ -216,10 +217,10 @@ function render(node, direct, remote) {
 
     let remoteBlock;
     if (!remote.available) {
-        remoteBlock = "<b>远端探测</b>: ⚠️ 未完成";
+        remoteBlock = "<b>Kiểm tra từ xa</b>: ⚠️ Chưa hoàn tất";
         if (remote.error) remoteBlock += `<br/><small>${escapeHtml(remote.error)}</small>`;
     } else {
-        remoteBlock = `<b>远端探测</b>: ${remote.reachable ? "✅ 可达" : "❌ 不可达"}`;
+        remoteBlock = `<b>Kiểm tra từ xa</b>: ${remote.reachable ? "✅ Kết nối được" : "❌ Không kết nối được"}`;
         if (remote.data && remote.data.length) {
             for (let i = 0; i < remote.data.length; i += 2) {
                 const left = remote.data[i];
@@ -231,27 +232,27 @@ function render(node, direct, remote) {
     }
     parts.push(remoteBlock);
 
-    parts.push("<b>📋 诊断结论</b>");
+    parts.push("<b>📋 Kết luận</b>");
     if (!direct.ok) {
-        parts.push("⚠️ 本机网络异常");
+        parts.push("⚠️ Mạng máy bất thường");
     } else if (node.ok) {
-        parts.push("✅ 节点正常");
+        parts.push("✅ Node hoạt động bình thường");
     } else if (remote.available && remote.reachable) {
-        parts.push("🚫 疑似被运营商 / GFW 阻断");
+        parts.push("🚫 Nghi bị nhà mạng / GFW chặn");
     } else if (remote.available) {
-        parts.push("💤 节点疑似离线");
+        parts.push("💤 Node nghi ngờ đã offline");
     } else {
-        parts.push("❓ 数据不足，无法区分阻断或离线");
+        parts.push("❓ Không đủ dữ liệu để phân biệt bị chặn hay offline");
     }
 
     const type = nodeInfo.type ? ` · ${escapeHtml(nodeInfo.type)}` : "";
-    parts.push(`<b>节点</b>: <span style="color:#467fcf">${escapeHtml(nodeName)}${type}</span>`);
+    parts.push(`<b>Node</b>: <span style="color:#467fcf">${escapeHtml(nodeName)}${type}</span>`);
     if (remote.target) {
-        parts.push(`<small>探测目标: ${escapeHtml(remote.target)}</small>`);
+        parts.push(`<small>Mục tiêu kiểm tra: ${escapeHtml(remote.target)}</small>`);
     }
 
     $done({
-        title: "   🌐 节点阻断检测",
+        title: "   🌐 Kiểm Tra Chặn Node",
         htmlMessage: `<div style="font-family:-apple-system;font-size:large">${parts.join("<br/><br/>")}</div>`,
     });
 }
@@ -281,12 +282,12 @@ function escapeHtml(value) {
 }
 
 function errorMessage(error) {
-    return error && error.message ? error.message : String(error || "未知错误");
+    return error && error.message ? error.message : String(error || "Lỗi không xác định");
 }
 
 function finishError(message) {
     $done({
-        title: "   🌐 节点阻断检测",
+        title: "   🌐 Kiểm Tra Chặn Node",
         htmlMessage: `<div style="font-family:-apple-system;font-size:large"><b>🛑 ${escapeHtml(message)}</b></div>`,
     });
 }
