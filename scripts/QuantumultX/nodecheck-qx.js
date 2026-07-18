@@ -9,7 +9,7 @@
  *
  * Cấu hình (Quantumult X):
  *   [task_local]
- *   event-interaction https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/QuantumultX/nodecheck.js, tag=Kiểm Tra Chặn Node, img-url=bolt.horizontal.icloud.fill.system, enabled=true
+ *   event-interaction https://raw.githubusercontent.com/2KGT/sv/refs/heads/main/scripts/QuantumultX/nodecheck-qx.js, tag=Kiểm Tra Chặn Node, img-url=bolt.horizontal.icloud.fill.system, enabled=true
  *
  * Cách dùng: nhấn giữ node trong danh sách → chọn chạy script
  */
